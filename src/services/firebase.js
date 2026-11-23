@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -12,7 +13,12 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
+export const firebaseConfigured = ["apiKey", "authDomain", "projectId", "appId"].every(
+  key => typeof firebaseConfig[key] === "string" && firebaseConfig[key].trim().length > 0
+);
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+const app = firebaseConfigured ? initializeApp(firebaseConfig) : null;
+
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
+export const functions = app ? getFunctions(app, "us-central1") : null;
