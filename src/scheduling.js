@@ -75,7 +75,7 @@ export function recommend(request, bookings, now = new Date()) {
   return { conflict, alternatives };
 }
 
-export function recommendEquipment(project, equipment) {
+function rankEquipment(project, equipment) {
   const query = project.trim().toLowerCase();
   if (!query) return [];
   const genericTerms = new Set(["model", "project", "system", "device", "prototype", "research", "build", "building", "using"]);
@@ -86,14 +86,26 @@ export function recommendEquipment(project, equipment) {
       const name = item.name.toLowerCase();
       const category = item.category.toLowerCase();
       const description = item.description.toLowerCase();
-      const score = keywords.reduce((total, keyword) => total + (query.includes(keyword) ? 3 : 0), 0) +
-        (name.split(/\W+/).filter(word => word.length > 2 && query.includes(word)).length * 2) +
-        (category.split(/\W+/).filter(word => word.length > 2 && query.includes(word)).length * 2) +
-        (description.split(/\W+/).filter(word => word.length > 3 && !genericTerms.has(word) && query.includes(word)).length);
-      return { item, score };
+      const matchedKeywords = keywords.filter(keyword => query.includes(keyword));
+      const matchedName = name.split(/\W+/).filter(word => word.length > 2 && query.includes(word));
+      const matchedCategory = category.split(/\W+/).filter(word => word.length > 2 && query.includes(word));
+      const matchedDescription = description.split(/\W+/).filter(word => word.length > 3 && !genericTerms.has(word) && query.includes(word));
+      const score = matchedKeywords.length * 3 + (matchedName.length + matchedCategory.length) * 2 + matchedDescription.length;
+      const matchedTerms = [...new Set([...matchedKeywords, ...matchedName, ...matchedCategory, ...matchedDescription])];
+      return { item, score, matchedTerms };
     })
     .filter(result => result.score > 0)
     .sort((first, second) => second.score - first.score || first.item.name.localeCompare(second.item.name))
-    .slice(0, 3)
-    .map(result => result.item);
+    .slice(0, 3);
+}
+
+export function recommendEquipment(project, equipment) {
+  return rankEquipment(project, equipment).map(result => result.item);
+}
+
+export function recommendEquipmentWithReasons(project, equipment) {
+  return rankEquipment(project, equipment).map(({ item, matchedTerms }) => ({
+    ...item,
+    explanation: `Rule-based match: your description mentions ${matchedTerms.slice(0, 4).join(", ")}, which overlaps with this resource's listed name, category, description, or capabilities.`,
+  }));
 }

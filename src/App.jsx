@@ -9,11 +9,11 @@ import {
   TrendingUp, Target, ChevronLeft, LogOut, UserRound, Settings2
 } from "lucide-react";
 import "./App.css";
-import { addDays, CAMPUS_TIME_ZONE, currentTime, HOURS, isSlotOccupied, recommend, recommendEquipment, today, overlaps } from "./scheduling";
+import { addDays, CAMPUS_TIME_ZONE, currentTime, HOURS, isSlotOccupied, recommend, recommendEquipmentWithReasons, today, overlaps } from "./scheduling";
 import AuthDialog from "./components/AuthDialog";
 import { auth, firebaseConfigured } from "./services/firebase";
 import { observeAuth, signOutUser } from "./services/auth";
-import { createBookingRequest, ensureRole, reviewBooking, seedEquipment as seedCloudEquipment, setUserRole, watchBookings, watchEquipment, rescheduleBooking } from "./services/cloud";
+import { createBookingRequest, ensureRole, recommendProjectEquipment, reviewBooking, seedEquipment as seedCloudEquipment, setUserRole, watchBookings, watchEquipment, rescheduleBooking } from "./services/cloud";
 
 const EQUIPMENT = [
   { id: "jetson", name: "NVIDIA Jetson Nano", dept: "AI & Robotics", category: "AI Computing", location: "Innovation Lab · A-204", icon: Cpu, color: "mint", description: "Edge AI development, computer vision and autonomous systems.", specs: ["4 GB edge compute", "CUDA-enabled", "On-site induction"], keywords: ["edge ai", "computer vision", "robotics", "autonomous", "machine learning"] },
@@ -69,6 +69,9 @@ export default function App() {
   const [calendarStart, setCalendarStart] = useState(today());
   const [calendarEquipment, setCalendarEquipment] = useState(EQUIPMENT[0].id);
   const [projectAnalysis, setProjectAnalysis] = useState("");
+  const [projectRecommendations, setProjectRecommendations] = useState([]);
+  const [recommendationSource, setRecommendationSource] = useState("");
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [role, setRole] = useState("student");
   const [authLoading, setAuthLoading] = useState(firebaseConfigured);
@@ -193,7 +196,6 @@ export default function App() {
   const approved = bookings.filter(b => b.status === "approved").length;
   const pending = bookings.filter(b => b.status === "pending").length;
   const conflicts = bookings.filter(b => b.status === "conflict").length;
-  const recommendations = useMemo(() => recommendEquipment(projectAnalysis, equipment), [projectAnalysis, equipment]);
   const upcomingApproved = bookings.filter(b =>
     b.status === "approved" && b.date >= today() && b.date <= addDays(6)
   );
@@ -210,6 +212,33 @@ export default function App() {
   function openBooking(equipment) {
     setSelected(equipment);
     setNotice("");
+  }
+
+  async function findProjectEquipment() {
+    const description = project.trim();
+    if (!description || recommendationLoading) return;
+    setProjectAnalysis(description);
+    setRecommendationLoading(true);
+    setNotice("");
+
+    if (!authUser) {
+      setProjectRecommendations(recommendEquipmentWithReasons(description, equipment));
+      setRecommendationSource("rule-based");
+      setRecommendationLoading(false);
+      return;
+    }
+
+    try {
+      const result = await recommendProjectEquipment(description);
+      setProjectRecommendations(addEquipmentVisuals(result.recommendations));
+      setRecommendationSource("gemini");
+    } catch (error) {
+      setProjectRecommendations(recommendEquipmentWithReasons(description, equipment));
+      setRecommendationSource("fallback");
+      setNotice(`Gemini recommendations are unavailable; showing rule-based matches instead. ${errorMessage(error)}`);
+    } finally {
+      setRecommendationLoading(false);
+    }
   }
 
   function openCalendarBooking(equipmentId, bookingDate, bookingTime) {
@@ -487,15 +516,15 @@ export default function App() {
           </>}
 
           {page === "projects" && <>
-            <PageHeader eyebrow="PROJECT INTELLIGENCE" title="From idea to equipment" description="Describe what you are building. LabLink matches your project goals to campus resources using transparent capability matching."/>
+            <PageHeader eyebrow="PROJECT INTELLIGENCE" title="From idea to equipment" description="Describe what you are building. Signed-in students can get Gemini recommendations grounded in the campus catalog; the transparent rule-based matcher remains available in demo mode and as a fallback."/>
             <section className="project-workspace">
               <div className="project-prompt"><div className="prompt-icon"><Sparkles size={21}/></div><div><h2>Tell us about your project</h2><p>Include the techniques, materials or hardware you plan to use for more relevant matches.</p></div></div>
               <label className="project-label" htmlFor="project-description">Project description</label>
               <textarea id="project-description" value={project} onChange={event => setProject(event.target.value)} maxLength={1000} placeholder="e.g. I'm building a computer vision model for identifying plant disease using a camera and edge device."/>
-              <div className="project-prompt-footer"><span>{project.length}/1000 characters · Your description stays in this browser.</span><button className="primary-btn" disabled={!project.trim()} onClick={() => setProjectAnalysis(project.trim())}>Find equipment <Sparkles size={17}/></button></div>
+              <div className="project-prompt-footer"><span>{project.length}/1000 characters · {authUser ? "Gemini sends your description and listed equipment details to Google; it is not saved by LabLink." : "Demo mode keeps your description in this browser and uses rule-based matching."}</span><button className="primary-btn" disabled={!project.trim() || recommendationLoading || authLoading} onClick={findProjectEquipment}>{recommendationLoading ? "Finding matches…" : authUser ? "Ask Gemini" : "Find equipment"} <Sparkles size={17}/></button></div>
             </section>
-            {projectAnalysis && <section className="project-results" aria-live="polite"><div className="section-head"><div><div className="eyebrow">CAPABILITY MATCH</div><h2>Recommended resources</h2></div><span className="match-label"><Target size={16}/> Transparent, rule-based</span></div>
-              {recommendations.length ? <><p className="project-explanation"><TrendingUp size={17}/> Matches are ranked by overlapping project terms and listed equipment capabilities. No external AI service is connected.</p><EquipmentGrid items={recommendations} onBook={openBooking}/></> : <div className="empty"><Lightbulb size={28}/><h3>No direct match yet</h3><p>Try naming a technique or tool, such as computer vision, sensors, 3D printing or circuit testing.</p></div>}
+            {projectAnalysis && <section className="project-results" aria-live="polite"><div className="section-head"><div><div className="eyebrow">PROJECT RECOMMENDATIONS</div><h2>Recommended resources</h2></div><span className="match-label"><Target size={16}/> {recommendationSource === "gemini" ? "Gemini · catalog-grounded" : recommendationSource === "fallback" ? "Rule-based fallback" : "Transparent, rule-based demo"}</span></div>
+              {recommendationLoading ? <LoadingState label="Matching your project to campus equipment…"/> : projectRecommendations.length ? <><p className="project-explanation"><TrendingUp size={17}/>{recommendationSource === "gemini" ? "Gemini ranked active campus equipment and explains each match. Availability and booking approval are checked separately." : "Matches are ranked deterministically from overlapping project terms and listed equipment capabilities."}</p><EquipmentGrid items={projectRecommendations} onBook={openBooking}/></> : <div className="empty"><Lightbulb size={28}/><h3>No direct match yet</h3><p>Try naming a technique or tool, such as computer vision, sensors, 3D printing or circuit testing.</p></div>}
             </section>}
             {!projectAnalysis && <div className="prompt-examples"><span>Try a starting point</span>{["computer vision prototype", "IoT sensor network", "3D printed enclosure"].map(example => <button key={example} onClick={() => setProject(example)}>{example}<ArrowUpRight size={14}/></button>)}</div>}
           </>}
@@ -583,6 +612,7 @@ function EquipmentGrid({ items, onBook }) {
   return <div className="equipment-grid">{items.map(e => <article className="equipment-card" key={e.id}>
     <div className="equipment-card-top"><div className={`equipment-icon ${e.color}`}><e.icon size={31} strokeWidth={1.6}/></div><span className="available"><span className="online-dot"/> LISTED</span></div>
     <div className="equipment-dept">{e.dept} <span>· {e.category}</span></div><h3>{e.name}</h3><p>{e.description}</p>
+    {e.explanation && <p className="recommendation-reason">{e.explanation}</p>}
     <div className="spec-list">{e.specs.map(spec => <span key={spec}>{spec}</span>)}</div>
     <div className="equipment-bottom"><span>{e.location}</span><button onClick={() => onBook(e)} aria-label={`Request ${e.name}`}><ArrowUpRight size={19}/></button></div>
   </article>)}</div>;

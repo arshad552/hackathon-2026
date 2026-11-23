@@ -240,6 +240,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .match-label { display: inline-flex; align-items: center; gap: 7px; color: #a4b8cb; font-size: 10px; }
 .match-label svg,.project-explanation svg { color: #8af5d2; flex: 0 0 auto; }
 .project-explanation { display: flex; align-items: center; gap: 9px; margin: -4px 0 17px; color: #91a6bc; font-size: 11px; line-height: 1.6; }
+.recommendation-reason { padding: 10px 11px; border-left: 2px solid #6eddbb; border-radius: 0 7px 7px 0; background: #152b30; color: #b7d8d1 !important; font-size: 11px !important; line-height: 1.55 !important; }
 .prompt-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 19px; color: #778ba3; font-size: 10px; }
 .prompt-examples button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid #2c4054; border-radius: 8px; background: #111b2b; color: #b6c8d8; font-size: 10px; }
 .prompt-examples button:hover { border-color: #4e9687; color: #8af5d2; }

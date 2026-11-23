@@ -2,13 +2,18 @@ const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { canReviewRole, dateKeyInZone, reservationLockId, roleOrStudent, timeKeyInZone, validateBookingInput } = require("./domain.cjs");
+const { buildGeminiRequest, GEMINI_MODEL, parseGeminiRecommendations, validateProjectDescription } = require("./gemini.cjs");
+const { logger } = require("firebase-functions");
 
 initializeApp();
 
 const auth = getAuth();
 const db = getFirestore();
 const CAMPUS_TIME_ZONE = process.env.LABLINK_TIME_ZONE || "UTC";
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const GEMINI_DAILY_LIMIT = 10;
 
 function campusClock() {
   const now = new Date();
@@ -218,3 +223,73 @@ exports.rescheduleBooking = onCall(async request => {
     return { bookingId, status };
   });
 });
+
+exports.recommendProjectEquipment = onCall(
+  { secrets: [GEMINI_API_KEY], timeoutSeconds: 30 },
+  async request => {
+    const identity = requireSignedIn(request);
+    let project;
+    try {
+      project = validateProjectDescription(request.data?.project);
+    } catch (error) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+
+    const apiKey = GEMINI_API_KEY.value();
+    if (!apiKey) {
+      throw new HttpsError("failed-precondition", "Gemini is not configured on the server.");
+    }
+
+    const equipmentSnapshot = await db.collection("equipment").where("active", "==", true).limit(100).get();
+    const equipment = equipmentSnapshot.docs.map(document => ({ id: document.id, ...document.data() }));
+    if (!equipment.length) {
+      throw new HttpsError("failed-precondition", "The campus equipment catalog is empty.");
+    }
+
+    const usageDate = new Date().toISOString().slice(0, 10);
+    const usageRef = db.collection("genAiUsage").doc(`${identity.uid}_${usageDate}`);
+    await db.runTransaction(async transaction => {
+      const usage = await transaction.get(usageRef);
+      const count = usage.exists ? usage.data().count : 0;
+      if (count >= GEMINI_DAILY_LIMIT) {
+        throw new HttpsError("resource-exhausted", "You've reached today's AI recommendation limit. Try the rule-based matcher instead.");
+      }
+      transaction.set(usageRef, { count: count + 1, updatedAt: FieldValue.serverTimestamp() });
+    });
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify(buildGeminiRequest(project, equipment)),
+          signal: AbortSignal.timeout(20000),
+        },
+      );
+      if (!response.ok) {
+        logger.warn("Gemini recommendation provider returned an error", { status: response.status });
+        throw new Error("Gemini provider request failed.");
+      }
+      const payload = await response.json();
+      const text = payload.candidates?.[0]?.content?.parts
+        ?.map(part => part.text || "")
+        .join("")
+        .trim();
+      if (!text) throw new Error("Gemini response contained no recommendation text.");
+
+      return {
+        model: GEMINI_MODEL,
+        recommendations: parseGeminiRecommendations(text, equipment),
+      };
+    } catch (error) {
+      logger.warn("Gemini recommendation request failed", {
+        code: error.name === "TimeoutError" ? "timeout" : "provider_or_response_error",
+      });
+      throw new HttpsError("unavailable", "Gemini is temporarily unavailable. Use the rule-based recommendations instead.");
+    }
+  },
+);

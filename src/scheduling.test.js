@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSlotOccupied, overlaps, recommend, recommendEquipment } from "./scheduling";
+import { isSlotOccupied, overlaps, recommend, recommendEquipment, recommendEquipmentWithReasons } from "./scheduling";
 
 const request = {
   equipmentId: "scope",
@@ -54,5 +54,6 @@ describe("deterministic booking recommendations", () => {
     expect(recommendEquipment("computer vision model", equipment).map(item => item.id)).toEqual(["gpu"]);
     expect(recommendEquipment("an unrelated literature review", equipment)).toEqual([]);
     expect(recommendEquipment("model", equipment)).toEqual([]);
+    expect(recommendEquipmentWithReasons("computer vision", equipment)[0].explanation).toContain("Rule-based match");
   });
 });

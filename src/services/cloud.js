@@ -45,3 +45,4 @@ export const reviewBooking = (bookingId, decision) => invoke("reviewBooking", { 
 export const rescheduleBooking = (bookingId, date, time) => invoke("rescheduleBooking", { bookingId, date, time });
 export const seedEquipment = () => invoke("seedEquipment");
 export const setUserRole = (uid, role) => invoke("setUserRole", { uid, role });
+export const recommendProjectEquipment = project => invoke("recommendProjectEquipment", { project });

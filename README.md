@@ -66,5 +66,15 @@ These are preparation steps; nothing was deployed and no live security rules wer
 - The root Firebase web API key is a client identifier, not a server secret; restrict it in Google Cloud to the intended APIs and web origins. Firebase Admin credentials must remain outside the repository and browser bundle.
 - `ensureRole`, role assignment, equipment seeding, booking creation, approval/rejection, and rescheduling are Firebase callable functions in `functions/src/index.js`. Faculty checks use the verified Firebase ID-token custom claim on the server, not just the React UI.
 - `firestore.rules` is a new proposed ruleset. It was not deployed. There was no pre-existing rules file or Firebase deployment configuration in the repository to compare against.
-- This project intentionally does not include Gemini credentials or a GenAI endpoint. Project matching remains transparent and deterministic.
+- Project Studio uses the deterministic rule-based matcher in no-login Demo mode. For authenticated users, it can call the `recommendProjectEquipment` Cloud Function, which sends the description and up to 100 active equipment entries to Gemini and returns catalog-allowlisted recommendations with explanations. The frontend falls back to the deterministic matcher if the callable is not configured or fails. Gemini output is advisory only; availability and booking approval are handled separately.
+- The Gemini API key is a server-side Firebase Functions secret and is never part of Vite configuration. Gemini requests are limited to 10 attempts per Firebase UID per UTC day. Project descriptions are not stored by the callable, but are sent to Google for inference when an authenticated user requests Gemini recommendations.
+- Gemini has **not** been configured or deployed by this repository change. To enable it in a staging Firebase project, first confirm the intended Google AI project, API access, billing/quota, and the supported model configured in `functions/src/gemini.cjs`. Then set the secret and deploy the Functions code only after obtaining approval:
+
+  ```sh
+  firebase use <staging-project-id>
+  firebase functions:secrets:set GEMINI_API_KEY
+  firebase deploy --only functions:recommendProjectEquipment
+  ```
+
+  Firebase CLI prompts for the secret value; enter it there, never in source, shell history, `.env.local`, a `VITE_` variable, or `public/`. If Firebase deployment conventions require deploying all functions in the codebase, review the exact deployment target and obtain approval first. No command here changes live rules or deploys anything.
 - Backend unit tests validate booking input, fixed slots, role authorization policy, and reservation lock IDs. Firestore transaction concurrency and rules should additionally be exercised against the Firebase Emulator Suite in staging before production use.
